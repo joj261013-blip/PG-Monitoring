@@ -43,11 +43,14 @@ class ApiSpec:
 
 
 # 공공데이터포털 '조달청_나라장터 입찰공고정보서비스' / '조달청_나라장터 사전규격정보서비스'
-# (2025년 개편 후 경로. 이전 경로인 BidPublicInfoService04 등은 폐기됨)
+# ※ 요청 주소는 공공데이터포털 '활용신청 현황 → 서비스 상세 → 기능 미리보기' 창의 주소와 같아야 합니다.
+#   입찰공고정보서비스는 버전 02(서비스·오퍼레이션 이름 끝에 02)로 승인되어 있어,
+#   02가 없는 주소는 같은 키로도 '등록되지 않은 인증키(코드 30)'가 됩니다.
+#   (이전 경로인 BidPublicInfoService04 등은 폐기됨)
 APIS: tuple[ApiSpec, ...] = (
     ApiSpec(
         name="입찰공고정보서비스 (용역 입찰공고 목록)",
-        path="/1230000/ad/BidPublicInfoService/getBidPblancListInfoServc",
+        path="/1230000/ad/BidPublicInfoService02/getBidPblancListInfoServc02",
         number_fields=("bidNtceNo", "bidNtceOrd"),
         title_fields=("bidNtceNm",),
     ),
@@ -321,9 +324,9 @@ def adjust_for_shared_key(results: list[CheckResult]) -> list[CheckResult]:
 # 인증 오류가 한 API에서만 날 때, 같은 서비스의 다른 오퍼레이션도 같은 키로 시도해
 # '서비스 전체 문제'인지 '특정 오퍼레이션 문제'인지 가린다. (결과코드만 출력)
 DIAGNOSE_OPERATIONS: dict[str, tuple[str, ...]] = {
-    "/1230000/ad/BidPublicInfoService": (
-        "getBidPblancListInfoServc", "getBidPblancListInfoThng", "getBidPblancListInfoCnstwk",
-        "getBidPblancListInfoEtc", "getBidPblancListInfoServcPPSSrch",
+    "/1230000/ad/BidPublicInfoService02": (
+        "getBidPblancListInfoServc02", "getBidPblancListInfoThng02", "getBidPblancListInfoCnstwk02",
+        "getBidPblancListInfoEtc02", "getBidPblancListInfoServcPPSSrch02",
     ),
     "/1230000/ao/HrcspSsstndrdInfoService": (
         "getPublicPrcureThngInfoServc", "getPublicPrcureThngInfoThng", "getPublicPrcureThngInfoCnstwk",
@@ -353,11 +356,12 @@ def diagnose(service_key: str, params: dict[str, str], failed: list[CheckResult]
             lines.append(f"  {service}/{op}: HTTP {pr.http_status or '-'} / 코드 {code}")
         codes = [c for c in codes if c != "-"]  # 네트워크 오류로 응답이 없던 시도는 판정에서 제외
         if codes and all(c in ("20", "30") for c in codes):
-            lines.append("  → 판정: 이 서비스의 모든 오퍼레이션에서 같은 키가 거부됩니다. "
-                         "코드 문제가 아니라 공공데이터포털 쪽 인증키 등록(동기화) 문제입니다.")
-            lines.append("    해결: 공공데이터포털 해당 API 활용신청 상세에서 '변경신청'(내용 변경 없이 저장)으로 재동기화하거나, "
-                         "공공데이터포털 1:1 문의(오류신고)에 '다른 서비스는 같은 키로 정상, 이 서비스만 "
-                         "SERVICE_KEY_IS_NOT_REGISTERED_ERROR'라고 접수하세요. (인증키는 문의에 적지 마세요)")
+            lines.append("  → 판정: 이 서비스 주소의 모든 오퍼레이션에서 같은 키가 거부됩니다.")
+            lines.append("    해결 1: 공공데이터포털 활용신청 현황 → 이 서비스 상세 → 기능 '확인'(미리보기)으로 호출한 뒤, "
+                         "결과 창 주소의 서비스·오퍼레이션 이름(예: 끝의 02 같은 버전 번호)이 위 요청 주소와 같은지 비교하세요. "
+                         "다르면 api_check.py 의 APIS 주소를 포털과 같게 고치면 됩니다.")
+            lines.append("    해결 2: 주소가 같은데도 포털에서만 성공하면, 공공데이터포털 1:1 문의(오류신고)에 접수하세요. "
+                         "(인증키는 문의에 적지 마세요)")
         elif any(c == "00" or c == "03" for c in codes):
             lines.append("  → 판정: 일부 오퍼레이션은 정상입니다. 사용하는 오퍼레이션 문제이므로 개발자에게 이 진단 결과를 전달하세요.")
     return "\n".join(lines)
