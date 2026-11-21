@@ -110,7 +110,7 @@ PYTHONPATH=src python -m pg_monitoring
 | 조달청_나라장터 사전규격정보서비스 | `https://apis.data.go.kr/1230000/ao/HrcspSsstndrdInfoService/getPublicPrcureThngInfoServc` (용역 사전규격 목록) |
 
 요청 파라미터: `serviceKey`, `pageNo=1`, `numOfRows`(기본 5), `type=json`, `inqryDiv=1`(등록일시 기준),
-`inqryBgnDt`/`inqryEndDt`(YYYYMMDDHHMM, 한국시간, 기본 최근 7일)
+`inqryBgnDt`/`inqryEndDt`(YYYYMMDDHHMM, 한국시간, 기본 최근 3일. 입찰공고정보서비스는 7일 조회 시 "입력범위값 초과" 오류)
 
 ※ 주소는 공공데이터포털 **활용신청 현황 → 서비스 상세 → 기능 '확인'(미리보기)** 결과 창의 주소와 같아야 합니다.
   입찰공고정보서비스는 버전 `02`(서비스·오퍼레이션 이름 끝의 02)로 승인되어 있어, 02가 없는 주소는 같은 키로도

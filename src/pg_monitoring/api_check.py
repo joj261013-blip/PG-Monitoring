@@ -30,7 +30,7 @@ KST = timezone(timedelta(hours=9))
 API_HOST = "https://apis.data.go.kr"
 TIMEOUT_SECONDS = 30
 DEFAULT_ROWS = 5
-DEFAULT_DAYS = 7
+DEFAULT_DAYS = 3  # 입찰공고정보서비스(02)는 7일 조회 시 입력범위값 초과(07) → 3일은 정상 확인
 KEY_ENV_NAMES = ("NARA_API_KEY", "G2B_SERVICE_KEY")  # G2B_SERVICE_KEY 는 이전 이름(호환용)
 
 
@@ -479,7 +479,7 @@ def _int_env(name: str, default: int, low: int, high: int) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    days = _int_env("CHECK_DAYS", DEFAULT_DAYS, 1, 30)
+    days = _int_env("CHECK_DAYS", DEFAULT_DAYS, 1, 6)
     rows = _int_env("CHECK_ROWS", DEFAULT_ROWS, 1, 20)
 
     service_key = load_service_key()
