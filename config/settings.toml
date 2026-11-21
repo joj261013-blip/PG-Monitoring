@@ -1,0 +1,64 @@
+# ============================================================
+# PG-Monitoring 수집 설정
+# GitHub 웹에서 이 파일을 열고 연필(✏️) 아이콘으로 수정할 수 있습니다.
+# '#' 뒤는 설명(주석)이며 프로그램이 읽지 않습니다.
+# ============================================================
+
+[collect]
+# 처음 실행할 때(이력이 없을 때) 과거 며칠치를 수집할지
+initial_lookback_days = 14
+# 직전 정상 수집시각보다 몇 시간 앞부터 겹쳐서 다시 조회할지 (누락 방지)
+overlap_hours = 6
+# 수집이 며칠 실패했을 때, 최대 며칠 전까지 거슬러 올라가 복구할지
+max_backfill_days = 30
+# 한 번에 조회할 기간(일). 입찰공고(02)는 7일 이상이면 '입력범위값 초과' 오류가 나서 3일로 설정
+chunk_days = 3
+# 한 페이지에 받을 건수
+page_size = 100
+# 한 조회 구간에서 최대 몇 페이지까지 받을지 (무한 반복 방지용 안전장치)
+max_pages = 300
+# 일시적 오류 시 재시도 횟수와 대기 시간(초)
+retries = 3
+retry_wait_seconds = 5
+
+[report]
+# '신규'로 보고할 기간: 최근 몇 시간 안에 처음 수집된 공고
+new_window_hours = 24
+# 마감 전인 주요 공고(직접 관련·검토 필요)를 몇 건까지 요약에 넣을지
+max_active_in_summary = 50
+# 공개 상세 파일에 넣을 기간(등록 후 며칠까지)
+detail_days = 90
+
+[storage]
+# 관련성 '낮음' 공고는 등록 후 이 기간이 지나면 판정에 필요한 항목만 남기고 줄여서 보관 (삭제하지 않음)
+compact_low_after_days = 90
+
+# ------------------------------------------------------------
+# 수집 대상 API
+# enabled = true 인 것만 수집합니다.
+# ------------------------------------------------------------
+[sources.bid]
+enabled = true
+label = "입찰공고(용역)"
+path = "/1230000/ad/BidPublicInfoService02/getBidPblancListInfoServc02"
+kind = "bid"
+inqry_div = "1"   # 1: 등록(게시)일시 기준 조회
+
+[sources.prespec]
+enabled = true
+label = "사전규격(용역)"
+path = "/1230000/ao/HrcspSsstndrdInfoService/getPublicPrcureThngInfoServc"
+kind = "prespec"
+inqry_div = "1"
+
+# 물품 입찰공고: 현재 수집하지 않음. 필요하면 enabled = true 로 변경
+[sources.bid_goods]
+enabled = false
+label = "입찰공고(물품)"
+path = "/1230000/ad/BidPublicInfoService02/getBidPblancListInfoThng02"
+kind = "bid"
+inqry_div = "1"
+
+# 발주계획: 공공데이터포털에서 '조달청_나라장터 발주계획현황서비스' 활용신청 후 사용 가능 (미구현 확장 자리)
+# [sources.order_plan]
+# enabled = false
