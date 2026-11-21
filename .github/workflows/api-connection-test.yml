@@ -17,9 +17,9 @@ on:
   workflow_dispatch:
     inputs:
       days:
-        description: "조회 기간 (최근 며칠, 1~30)"
+        description: "조회 기간 (최근 며칠, 1~6. 입찰공고는 7일 이상이면 오류)"
         required: false
-        default: "7"
+        default: "3"
       rows:
         description: "API별 조회 건수 (1~20)"
         required: false
