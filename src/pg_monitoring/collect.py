@@ -104,6 +104,9 @@ def collect_source(src: Source, service_key: str, source_meta: dict, now: dateti
                          wait_seconds=float(conf.get("retry_wait_seconds", 5)))
             res.chunks.append(ChunkResult(cs, ce, div, fr.ok, fr.total_count, len(fr.items), fr.pages_fetched,
                                           fr.calls, fr.errors))
+            print(f"[{src.label}] 조회구분 {div} {cs:%m-%d %H:%M}~{ce:%m-%d %H:%M}: "
+                  f"{'정상' if fr.ok else '실패'} 전체 {fr.total_count}건, 수신 {len(fr.items)}건, "
+                  f"{fr.pages_fetched}페이지, 호출 {fr.calls}회", flush=True)
             for item in fr.items:  # 일부 실패한 구간에서 받은 데이터도 실제 데이터이므로 반영
                 merged["-".join(str(item.get(f, "")).strip() for f in ID_FIELDS[src.kind])] = item
             chunk_ok[(cs, ce)] = chunk_ok.get((cs, ce), True) and fr.ok
