@@ -24,6 +24,16 @@ on:
         description: "API별 조회 건수 (1~20)"
         required: false
         default: "5"
+      probe:
+        description: "API 명세 확인 조회도 함께 실행 (개발용)"
+        type: boolean
+        required: false
+        default: false
+      pipeline:
+        description: "운영 수집 전체 시험 (이력 저장·게시 없음, 개발용)"
+        type: boolean
+        required: false
+        default: false
       deploy:
         description: "테스트 성공 시 GitHub Pages에 샘플 페이지 배포 (공개됨)"
         type: boolean
@@ -40,7 +50,7 @@ jobs:
   api-check:
     name: API 연결 확인 및 샘플 생성
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 30
     permissions:
       contents: read
     steps:
@@ -62,6 +72,30 @@ jobs:
           SITE_DIR: site
           PYTHONPATH: src
         run: python -m pg_monitoring.api_check
+
+      - name: API 명세 확인 조회 (선택)
+        if: ${{ inputs.probe }}
+        env:
+          NARA_API_KEY: ${{ secrets.NARA_API_KEY }}
+          PYTHONPATH: src
+        run: python -m pg_monitoring.probe
+
+      - name: 운영 수집 전체 시험 (선택)
+        if: ${{ inputs.pipeline }}
+        env:
+          NARA_API_KEY: ${{ secrets.NARA_API_KEY }}
+          PYTHONPATH: src
+          RUN_VALIDATION: "true"
+        run: python -m pg_monitoring.run --out-dir pipeline-out
+
+      - name: 운영 수집 시험 결과 보관 (선택)
+        if: ${{ inputs.pipeline }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: pipeline-site
+          path: pipeline-out/site/
+          retention-days: 7
+          include-hidden-files: true
 
       - name: 샘플 파일 보관 (미리보기용 다운로드)
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

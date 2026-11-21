@@ -1,0 +1,239 @@
+# 나라장터 PG 모니터링 (운영)
+#
+# 자동 실행(한국시간): 매일 08:50, 15:30 + 15:50 보조 실행(15:30이 정상이면 건너뜀)
+#   ※ 저장소 Settings → Secrets and variables → Actions → Variables 에서
+#     MONITOR_ENABLED = true 로 설정해야 자동 실행이 동작합니다. (수동 실행은 항상 가능)
+# 수동 실행: Actions → "나라장터 PG 모니터링" → Run workflow
+#
+# 작업 구성 (권한 분리)
+#   1) collect : 나라장터 수집 (인증키 사용, 저장소 읽기만 가능)
+#   2) save    : 이력을 data 브랜치에 저장 (인증키 없음, 이 저장소 쓰기만 가능)
+#   3) publish : 공개 결과를 별도 공개 저장소에 게시 (인증키 없음, 공개 저장소 배포키만 사용)
+#   4) result  : 전체 결과 판정 (실패 시 빨간색 표시 → GitHub 이메일 알림)
+# 수집이 실패해도 기존 이력은 지우지 않고, 공개 페이지에는 '수집 실패'와 마지막 정상 데이터를 표시합니다.
+name: 나라장터 PG 모니터링
+
+on:
+  schedule:
+    - cron: "50 23 * * *"  # 한국시간 08:50
+    - cron: "30 6 * * *"   # 한국시간 15:30
+    - cron: "50 6 * * *"   # 한국시간 15:50 (보조)
+  workflow_dispatch:
+    inputs:
+      validate:
+        description: "검증 사례(삼다수·인터넷등기소·학점은행제·세종문화회관) 조회도 실행"
+        type: boolean
+        default: false
+      publish:
+        description: "공개 저장소에 결과 게시"
+        type: boolean
+        default: true
+
+permissions: {}
+
+concurrency:
+  group: pg-monitor
+  cancel-in-progress: false
+
+env:
+  STATE_BRANCH: data
+
+jobs:
+  collect:
+    name: 1. 나라장터 수집
+    if: ${{ github.event_name != 'schedule' || vars.MONITOR_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    outputs:
+      status: ${{ steps.run.outputs.status }}
+      produced: ${{ steps.run.outputs.produced }}
+    steps:
+      - name: 코드 가져오기
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: 이력 브랜치 확인
+        id: branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          if out=$(git -c http.extraheader="$auth" ls-remote --heads "https://github.com/${GITHUB_REPOSITORY}.git" "$STATE_BRANCH"); then
+            if [ -n "$out" ]; then echo "exists=true" >> "$GITHUB_OUTPUT"; else echo "exists=false" >> "$GITHUB_OUTPUT"; echo "첫 실행: 이력 브랜치 없음"; fi
+          else
+            echo "::error::이력 브랜치 확인 실패 - 기존 이력을 덮어쓰지 않도록 중단합니다"; exit 1
+          fi
+
+      - name: 이력 가져오기
+        if: ${{ steps.branch.outputs.exists == 'true' }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.STATE_BRANCH }}
+          path: statebranch
+          persist-credentials: false
+
+      - name: Python 3.12 설치
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+
+      - name: 수집 실행
+        id: run
+        env:
+          NARA_API_KEY: ${{ secrets.NARA_API_KEY }}
+          PYTHONPATH: src
+          RUN_VALIDATION: ${{ inputs.validate }}
+          # 15:50 보조 실행은 최근 40분 안에 정상 수집됐으면 건너뜀
+          SKIP_IF_SUCCESS_WITHIN_MINUTES: ${{ github.event.schedule == '50 6 * * *' && '40' || '0' }}
+        run: python -m pg_monitoring.run --state-dir statebranch/state --out-dir out
+
+      - name: 이력 파일 전달
+        if: ${{ steps.run.outputs.produced == 'true' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: state
+          path: out/state/
+          retention-days: 3
+          if-no-files-found: error
+
+      - name: 공개 결과 보관
+        if: ${{ steps.run.outputs.produced == 'true' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: site
+          path: out/site/
+          retention-days: 30
+          include-hidden-files: true
+          if-no-files-found: error
+
+      - name: 수집 원본 보관 (30일, 비공개)
+        if: ${{ steps.run.outputs.produced == 'true' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: raw
+          path: out/raw/
+          retention-days: 30
+          if-no-files-found: ignore
+
+  save:
+    name: 2. 이력 저장
+    needs: collect
+    if: ${{ needs.collect.outputs.produced == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: 이력 파일 받기
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: state
+          path: incoming
+
+      - name: data 브랜치에 저장
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          git init -q repo && cd repo
+          git config http.extraheader "$auth"
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          if git ls-remote --exit-code --heads origin "$STATE_BRANCH" >/dev/null; then
+            git fetch -q --depth 1 origin "$STATE_BRANCH"
+            git checkout -q -b "$STATE_BRANCH" FETCH_HEAD
+          else
+            git checkout -q --orphan "$STATE_BRANCH"
+          fi
+          # 안전장치: 저장된 공고 수가 줄어들면 저장하지 않음 (이력은 삭제하지 않으므로 줄어들 수 없음)
+          python3 - <<'PY'
+          import json, pathlib, sys
+          def count(root):
+              return sum(len(json.loads(p.read_text(encoding="utf-8"))) for p in pathlib.Path(root).glob("notices/*/*.json"))
+          old, new = count("state"), count("../incoming")
+          print(f"저장된 공고 수: 기존 {old}건 → 새 {new}건")
+          if new < old:
+              print("::error::새 이력의 공고 수가 기존보다 적어 저장을 중단합니다 (이력 손실 방지)")
+              sys.exit(1)
+          PY
+          rm -rf state && mkdir state && cp -R ../incoming/. state/
+          git add -A
+          if git diff --cached --quiet; then echo "변경 사항 없음"; exit 0; fi
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -q -m "수집 결과 저장 $(TZ=Asia/Seoul date '+%Y-%m-%d %H:%M') (${{ needs.collect.outputs.status }})"
+          git push -q origin "$STATE_BRANCH"
+          echo "이력 저장 완료"
+
+  publish:
+    name: 3. 공개 결과 게시
+    needs: [collect, save]
+    if: ${{ needs.collect.outputs.produced == 'true' && (github.event_name == 'schedule' || inputs.publish) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions: {}
+    steps:
+      - name: 공개 결과 받기
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: site
+          path: site
+
+      - name: 공개 저장소에 게시
+        env:
+          DEPLOY_KEY: ${{ secrets.PUBLIC_SITE_DEPLOY_KEY }}
+          PUBLIC_REPO: ${{ vars.PUBLIC_SITE_REPO }}
+        run: |
+          set -euo pipefail
+          if [ -z "$PUBLIC_REPO" ] || [ -z "$DEPLOY_KEY" ]; then
+            echo "::error::공개 저장소 설정이 없습니다 (변수 PUBLIC_SITE_REPO, 비밀값 PUBLIC_SITE_DEPLOY_KEY). 운영 매뉴얼 '공개 저장소 연결'을 참고하세요."
+            exit 1
+          fi
+          if ! [[ "$PUBLIC_REPO" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
+            echo "::error::PUBLIC_SITE_REPO 형식이 올바르지 않습니다 (예: 계정명/저장소명)"; exit 1
+          fi
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/deploy_key && chmod 600 ~/.ssh/deploy_key
+          # GitHub 공식 SSH 호스트 키를 GitHub API(HTTPS)에서 받아 확인 (위장 서버로 보내지 않도록)
+          curl -fsSL https://api.github.com/meta \
+            | python3 -c 'import json,sys; [print("github.com", k) for k in json.load(sys.stdin)["ssh_keys"]]' \
+            > ~/.ssh/known_hosts
+          test -s ~/.ssh/known_hosts
+          cd site
+          git init -q -b main
+          git add -A
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -q -m "자동 게시 $(TZ=Asia/Seoul date '+%Y-%m-%d %H:%M') (${{ needs.collect.outputs.status }})"
+          # 공개 저장소에는 최신 결과 1개 커밋만 유지 (이전 공개본 이력이 쌓이지 않음)
+          GIT_SSH_COMMAND="ssh -i $HOME/.ssh/deploy_key -o IdentitiesOnly=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts -o StrictHostKeyChecking=yes" \
+            git push -q -f "git@github.com:${PUBLIC_REPO}.git" main
+          rm -f ~/.ssh/deploy_key
+          echo "게시 완료: https://${PUBLIC_REPO%%/*}.github.io/${PUBLIC_REPO#*/}/"
+
+  result:
+    name: 4. 결과 판정
+    needs: [collect, save, publish]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: 판정
+        env:
+          COLLECT: ${{ needs.collect.result }}
+          STATUS: ${{ needs.collect.outputs.status }}
+          SAVE: ${{ needs.save.result }}
+          PUBLISH: ${{ needs.publish.result }}
+        run: |
+          echo "수집 작업: $COLLECT / 수집 상태: ${STATUS:-없음} / 이력 저장: $SAVE / 게시: $PUBLISH"
+          if [ "$COLLECT" = "skipped" ]; then echo "자동 실행이 꺼져 있음 (변수 MONITOR_ENABLED)"; exit 0; fi
+          if [ "$STATUS" = "skipped" ]; then echo "보조 실행: 최근 정상 수집이 있어 건너뜀"; exit 0; fi
+          fail=0
+          [ "$COLLECT" = "success" ] || { echo "::error::수집 작업 실패"; fail=1; }
+          [ "$STATUS" = "success" ] || { echo "::error::수집 상태가 정상이 아님: ${STATUS:-없음} (공개 페이지에는 마지막 정상 데이터와 실패 상태가 표시됨)"; fail=1; }
+          [ "$SAVE" = "success" ] || { echo "::error::이력 저장 실패: $SAVE"; fail=1; }
+          [ "$PUBLISH" = "success" ] || [ "$PUBLISH" = "skipped" ] || { echo "::error::공개 결과 게시 실패: $PUBLISH"; fail=1; }
+          exit $fail
