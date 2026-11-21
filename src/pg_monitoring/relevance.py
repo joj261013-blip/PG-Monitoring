@@ -41,6 +41,7 @@ class RelevanceJudge:
         self.labels = {k: str(v.get("label", k)) for k, v in self.categories.items()}
         self.fields = {kind: dict(v) for kind, v in keywords.get("fields", {}).items()}
         self.exclude = [_norm(w) for w in keywords.get("exclude", {}).get("words", []) if _norm(w)]
+        self.skip_fields = {k: set(v.get("skip_fields", [])) for k, v in self.categories.items()}
         self.matchers: list[Matcher] = []
         for cat, conf in self.categories.items():
             for word in conf.get("words", []):
@@ -64,6 +65,8 @@ class RelevanceJudge:
             for ex in self.exclude:
                 text = text.replace(ex, " ")
             for m in self.matchers:
+                if field_name in self.skip_fields.get(m.category, ()):
+                    continue
                 if (m.word, field_name) in seen:
                     continue
                 if m.pattern.search(text):

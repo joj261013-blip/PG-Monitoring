@@ -74,8 +74,14 @@ def test_validation_cases_are_direct(title):
     ("국가과학기술연구회 추진과제 사업비 위탁정산", "OO"),
     ("2026년 상생협력재단 예산정산(기금사업, 임치사업) 용역", "OO"),
     ("AI 기반 보안관제센터 운영 사업(27~29년) 용역", "금융결제원"),
+    ("전자의결권 플랫폼 구현업무 아웃소싱 사업", "한국예탁결제원"),
     ("’27~’28 학점은행제-독학학위제 콜센터 운영 위탁사업(장기 2년)", "OO"),
     ("제주삼다수 직장어린이집 위탁운영 용역", "OO"),
 ])
 def test_known_false_positives_are_low(title, org):
     assert J.judge("bid", bid(title, dminsttNm=org)).level == "low"
+
+
+def test_direct_keyword_still_checked_in_org_fields():
+    r = J.judge("bid", bid("시스템 운영", dminsttNm="OO 전자결제센터"))
+    assert r.level == "direct"  # 직접 관련 단어는 기관명에서도 판정
