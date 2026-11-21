@@ -29,7 +29,8 @@ def test_two_strong_categories_is_direct():
 
 
 @pytest.mark.parametrize("title", ["응시료 납부 시스템 유지보수", "공공요금 고지 개선", "키오스크 유지관리 용역",
-                                   "인터넷등기소 시스템 운영", "학점은행제 학습자 관리 시스템"])
+                                   "진료비 신용카드 부가가치 통신망(VAN) 서비스 계약",
+                                   "민락수변공원 공영주차장 바닥제어 무인정산 주차시스템 설치"])
 def test_review(title):
     assert J.judge("bid", bid(title)).level == "review"
 
@@ -54,3 +55,27 @@ def test_exclude_words():
                         "exclude": {"words": ["등기우편"]}, "fields": {"bid": {"bidNtceNm": "공고명"}}})
     assert j.judge("bid", bid("등기우편 발송 용역")).level == "low"
     assert j.judge("bid", bid("등기 시스템")).level == "review"
+
+
+# 2026-11-21 실제 나라장터 검색으로 확인된 검증 사례 공고명 (공개 정보)
+@pytest.mark.parametrize("title", [
+    "제주삼다수 자사몰 전자지급결제대행(PG) 사업자 선정",
+    "인터넷등기소 등 전자지급결제대행 사업(2027~2028)",
+    "’27~’29 학점은행제‧독학학위제 수수료 전자결제대행(PG) 용역(장기 3년)",
+    "세종문화회관 전자지급결제대행사(PG) 운영",
+])
+def test_validation_cases_are_direct(title):
+    assert J.judge("bid", bid(title)).level == "direct"
+
+
+# 같은 수집에서 확인된 오탐 → 낮음이어야 함
+@pytest.mark.parametrize("title,org", [
+    ("2026년 귀속 연말정산 용역", "OO공단"),
+    ("국가과학기술연구회 추진과제 사업비 위탁정산", "OO"),
+    ("2026년 상생협력재단 예산정산(기금사업, 임치사업) 용역", "OO"),
+    ("AI 기반 보안관제센터 운영 사업(27~29년) 용역", "금융결제원"),
+    ("’27~’28 학점은행제-독학학위제 콜센터 운영 위탁사업(장기 2년)", "OO"),
+    ("제주삼다수 직장어린이집 위탁운영 용역", "OO"),
+])
+def test_known_false_positives_are_low(title, org):
+    assert J.judge("bid", bid(title, dminsttNm=org)).level == "low"
