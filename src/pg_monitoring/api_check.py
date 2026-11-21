@@ -166,6 +166,7 @@ class CheckResult:
     total_count: int | None = None
     examples: list[tuple[str, str]] = field(default_factory=list)
     items: list[dict] = field(default_factory=list, repr=False)  # 원본 응답(출력 금지, 공개 파일은 화이트리스트로만 생성)
+    note: str | None = None  # 자동 재시도 등 참고사항
     raw_snippet: str | None = None  # 해석 불가 응답의 앞부분 (출력 전 인증키 제거됨)
     error_cause: str | None = None
     error_fix: str | None = None
@@ -205,11 +206,22 @@ def _example(spec: ApiSpec, item: dict) -> tuple[str, str]:
 
 
 def _parse_json_response(body: str) -> tuple[dict, dict] | None:
+    """{"response": {...}} 형태. 오류는 {"nkoneps.com.response.ResponseError": {"header": ...}} 처럼
+    최상위 이름이 다를 수 있으므로, header 를 가진 최상위 값을 찾는다."""
     try:
-        response = json.loads(body)["response"]
-        return response.get("header", {}) or {}, response.get("body") or {}
-    except (ValueError, KeyError, TypeError, AttributeError):
+        data = json.loads(body)
+    except ValueError:
         return None
+    if not isinstance(data, dict):
+        return None
+    response = data.get("response")
+    if not isinstance(response, dict):
+        response = next((v for v in data.values() if isinstance(v, dict) and "header" in v), None)
+    if not isinstance(response, dict):
+        return None
+    header = response.get("header") if isinstance(response.get("header"), dict) else {}
+    body_obj = response.get("body") if isinstance(response.get("body"), dict) else {}
+    return header, body_obj
 
 
 def _parse_xml_response(body: str) -> tuple[dict, dict] | None:
@@ -329,6 +341,32 @@ def check_api(spec: ApiSpec, service_key: str, params: dict[str, str]) -> CheckR
     return interpret(spec, status, body, result)
 
 
+RETRY_DAYS_ON_RANGE_ERROR = (3, 1)
+
+
+def retry_on_range_error(results: list[CheckResult], service_key: str, now: datetime,
+                         days: int, rows: int) -> list[CheckResult]:
+    """응답코드 07(입력범위값 초과)이면 조회 기간을 줄여 다시 시도한다."""
+    out = []
+    for spec, r in zip(APIS, results):
+        if r.result_code == "07":
+            tried = []
+            for d in (d for d in RETRY_DAYS_ON_RANGE_ERROR if d < days):
+                tried.append(d)
+                retry = check_api(spec, service_key, query_params(now, d, rows))
+                if retry.result_code != "07":
+                    retry.note = (f"조회 기간 {days}일은 '입력범위값 초과(07)'여서 {d}일로 줄여 다시 조회했습니다. "
+                                  f"이 API의 허용 조회 기간은 {d}일 이상 {days}일 미만입니다.")
+                    r = retry
+                    break
+            else:
+                r.note = (f"조회 기간을 {', '.join(map(str, tried))}일로 줄여도 '입력범위값 초과(07)'입니다. "
+                          "기간 외의 입력값 문제일 수 있으니 공공데이터포털 미리보기로 같은 값을 넣어 확인하세요."
+                          if tried else None)
+        out.append(r)
+    return out
+
+
 def adjust_for_shared_key(results: list[CheckResult]) -> list[CheckResult]:
     """두 API는 같은 인증키를 쓴다. 한쪽이 성공(=키 정상)했는데 다른 쪽이 인증 오류라면
     키 문제가 아니라 그 API의 활용신청(승인) 문제이므로 안내를 바꾼다."""
@@ -423,6 +461,8 @@ def format_report(results: list[CheckResult], params: dict[str, str]) -> str:
             lines.append(f"  공개 항목 중 응답에 없는 필드: {', '.join(missing) if missing else '없음'}")
         if r.error_cause:
             lines += [f"  오류 원인     : {r.error_cause}", f"  해결 방법     : {r.error_fix}"]
+        if r.note:
+            lines.append(f"  참고          : {r.note}")
         if r.raw_snippet:
             lines.append(f"  응답 앞부분   : {r.raw_snippet}")
     ok = sum(r.success for r in results)
@@ -451,7 +491,8 @@ def main(argv: list[str] | None = None) -> int:
 
     now = datetime.now(KST).replace(second=0, microsecond=0)
     params = query_params(now, days, rows)
-    results = adjust_for_shared_key([check_api(spec, service_key, params) for spec in APIS])
+    results = [check_api(spec, service_key, params) for spec in APIS]
+    results = adjust_for_shared_key(retry_on_range_error(results, service_key, now, days, rows))
     all_ok = all(r.success for r in results)
 
     site_dir = os.environ.get("SITE_DIR", "").strip()

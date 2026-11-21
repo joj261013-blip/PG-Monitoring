@@ -104,6 +104,7 @@ def build_data(results, generated_at: datetime, params: dict[str, str]) -> dict:
             "kind": kind,
             "success": r.success,
             "total_count": r.total_count,
+            "note": r.note or "",
             "fields": [{"key": k, "label": label} for _f, k, label in PUBLIC_FIELDS[kind]],
             "items": [to_public_record(kind, i) for i in r.items],
         })
@@ -165,6 +166,8 @@ def build_html(data: dict) -> str:
             f"<h2>{e(api['api'])}</h2>",
             f"<p>연결 상태: {status} · 조회 기간 전체 {e(str(total))}건 중 {len(api['items'])}건 표시</p>",
         ]
+        if api.get("note"):
+            out.append(f"<p>참고: {e(api['note'])}</p>")
         if not api["items"]:
             out.append("<p>표시할 공고가 없습니다.</p>")
             continue

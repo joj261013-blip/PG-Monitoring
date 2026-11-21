@@ -191,3 +191,47 @@ def test_unparseable_body_shows_snippet():
     assert not r.success and r.raw_snippet == "<html> 서비스 점검 중 </html>"
     report = ac.format_report([r], ac.query_params(datetime(2026, 1, 1, tzinfo=ac.KST), 7, 5))
     assert "응답 앞부분" in report and "서비스 점검 중" in report
+
+
+def test_interpret_nkoneps_error_wrapper():
+    """run #9 에서 실제로 받은 오류 응답 형식."""
+    body = '{"nkoneps.com.response.ResponseError": { "header": { "resultCode": "07", "resultMsg": "입력범위값 초과 에러" } }}'
+    r = ac.interpret(BID, 200, body, _result(BID))
+    assert not r.success and r.result_code == "07" and r.result_msg == "입력범위값 초과 에러"
+    assert "기간" in r.error_cause and r.raw_snippet is None
+
+
+def _range_fake(max_days):
+    seen = []
+
+    def fake(spec, key, params):
+        begin = datetime.strptime(params["inqryBgnDt"], "%Y%m%d%H%M")
+        end = datetime.strptime(params["inqryEndDt"], "%Y%m%d%H%M")
+        days = (end - begin).days
+        seen.append(days)
+        if days > max_days:
+            return ac.CheckResult(api_name=spec.name, endpoint="e", http_status=200, result_code="07")
+        return ac.CheckResult(api_name=spec.name, endpoint="e", http_status=200, result_code="00", success=True)
+    return fake, seen
+
+
+def test_retry_shorter_range_on_07(monkeypatch):
+    fake, seen = _range_fake(max_days=1)
+    monkeypatch.setattr(ac, "check_api", fake)
+    now = datetime(2026, 11, 21, 19, 0, tzinfo=ac.KST)
+    first = [ac.CheckResult(api_name=BID.name, endpoint="e", result_code="07"),
+             ac.CheckResult(api_name=PRE.name, endpoint="e", result_code="00", success=True)]
+    out = ac.retry_on_range_error(first, "k", now, days=7, rows=5)
+    assert seen == [3, 1]
+    assert out[0].success and "1일로 줄여" in out[0].note
+    assert out[1] is first[1]
+
+
+def test_retry_gives_up_with_note(monkeypatch):
+    fake, seen = _range_fake(max_days=0)
+    monkeypatch.setattr(ac, "check_api", fake)
+    now = datetime(2026, 11, 21, 19, 0, tzinfo=ac.KST)
+    first = [ac.CheckResult(api_name=BID.name, endpoint="e", result_code="07"),
+             ac.CheckResult(api_name=PRE.name, endpoint="e", result_code="00", success=True)]
+    out = ac.retry_on_range_error(first, "k", now, days=7, rows=5)
+    assert not out[0].success and "미리보기" in out[0].note
