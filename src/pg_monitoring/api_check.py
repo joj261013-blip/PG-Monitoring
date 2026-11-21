@@ -22,6 +22,9 @@ import urllib.request
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+from pg_monitoring import publish
 
 KST = timezone(timedelta(hours=9))
 API_HOST = "https://apis.data.go.kr"
@@ -159,6 +162,7 @@ class CheckResult:
     result_msg: str | None = None
     total_count: int | None = None
     examples: list[tuple[str, str]] = field(default_factory=list)
+    items: list[dict] = field(default_factory=list, repr=False)  # 원본 응답(출력 금지, 공개 파일은 화이트리스트로만 생성)
     error_cause: str | None = None
     error_fix: str | None = None
 
@@ -238,6 +242,7 @@ def interpret(spec: ApiSpec, http_status: int, body: str, result: CheckResult) -
     except (TypeError, ValueError):
         result.total_count = None
     items = _items_as_list(body_obj.get("items"))
+    result.items = items
     result.examples = [_example(spec, i) for i in items]
 
     if not items:
@@ -315,6 +320,12 @@ def format_report(results: list[CheckResult], params: dict[str, str]) -> str:
         if r.examples:
             lines.append("  공고 예시:")
             lines += [f"    - [{no}] {title}" for no, title in r.examples]
+        if r.items:
+            kind = publish.api_kind(r.endpoint)
+            names = sorted(set().union(*(i.keys() for i in r.items)))
+            missing = publish.missing_public_fields(kind, r.items)
+            lines.append(f"  응답 필드 목록(값 제외, 명세 확인용): {', '.join(names)}")
+            lines.append(f"  공개 항목 중 응답에 없는 필드: {', '.join(missing) if missing else '없음'}")
         if r.error_cause:
             lines += [f"  오류 원인     : {r.error_cause}", f"  해결 방법     : {r.error_fix}"]
     ok = sum(r.success for r in results)
@@ -341,9 +352,22 @@ def main(argv: list[str] | None = None) -> int:
         print("   해결: GitHub 저장소 Settings → Secrets and variables → Actions 에 NARA_API_KEY 를 등록하세요.")
         return 2
 
-    params = query_params(datetime.now(KST), days, rows)
+    now = datetime.now(KST).replace(second=0, microsecond=0)
+    params = query_params(now, days, rows)
     results = [check_api(spec, service_key, params) for spec in APIS]
+    all_ok = all(r.success for r in results)
+
+    site_dir = os.environ.get("SITE_DIR", "").strip()
+    site_line = ""
+    if site_dir and all_ok:
+        written = publish.write_site(results, now, params, Path(site_dir), scrub=lambda t: redact(t, service_key))
+        site_line = f"공개용 샘플 파일 생성: {', '.join(str(p) for p in written)}"
+    elif site_dir:
+        site_line = "공개용 샘플 파일 생성: 건너뜀 (두 API가 모두 성공해야 생성합니다)"
+
     report = redact(format_report(results, params), service_key)
+    if site_line:
+        report += "\n" + site_line
     print(report)
 
     summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
@@ -351,7 +375,7 @@ def main(argv: list[str] | None = None) -> int:
         with open(summary_path, "a", encoding="utf-8") as f:
             f.write("## 나라장터 API 연결 테스트 결과\n\n```text\n" + report + "\n```\n")
 
-    return 0 if all(r.success for r in results) else 1
+    return 0 if all_ok else 1
 
 
 if __name__ == "__main__":

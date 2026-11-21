@@ -5,14 +5,25 @@
 조달청 나라장터의 **입찰공고정보서비스**와 **사전규격정보서비스**(공공데이터포털 Open API)를 활용해
 PG(전자지급결제대행) 관련 공고를 자동으로 수집·선별하고 변경이력을 관리합니다.
 
-> **현재 상태: 2단계 – API 연결 테스트 구현됨**
-> 두 API의 연결을 확인하는 테스트(수동 실행)만 있습니다. 전체 공고 수집과 자동 정기 실행은 아직 구현되지 않았습니다.
+> **현재 상태: 2단계 – API 연결 테스트 + 공개용 샘플 페이지**
+> 두 API의 연결을 확인하고, 성공하면 소량 샘플을 JSON/HTML로 만들어 (선택 시) GitHub Pages에 올립니다.
+> 전체 공고 수집, PG 선별, 자동 정기 실행은 아직 구현되지 않았습니다.
+
+## 최종 목표
+
+ChatGPT에서 매일 16:10 예약 실행하는 **'PG 오후 모니터링'** 보고서가 이 프로젝트의 결과 페이지를 읽어
+나라장터 공고를 자동으로 포함하도록 하는 것입니다.
+
+```
+나라장터 API ──(GitHub Actions)──▶ PG 공고 선별·이력관리 ──▶ JSON/HTML ──(GitHub Pages)──▶ ChatGPT 보고서
+```
 
 ## 목표
 
 - 신규·정정·재공고 수집 및 변경이력 관리
 - PG 관련 공고 자동 선별(키워드 기반)
 - GitHub Actions로 정기 실행 (예정)
+- 공개 가능한 항목만 JSON/HTML로 만들어 GitHub Pages로 제공 → ChatGPT가 읽음
 - 유료 AI API·유료 서버 없이 무료로 독립 운영 (GitHub 무료 기능 + 공공데이터포털 무료 API)
 
 ## 폴더 구조
@@ -24,11 +35,13 @@ PG-Monitoring/
 │   ├── __main__.py        # 실행 진입점 (python -m pg_monitoring)
 │   ├── config.py          # .env / 환경변수에서 설정 읽기
 │   ├── api_check.py       # 나라장터 API 연결 테스트 (python -m pg_monitoring.api_check)
+│   ├── publish.py         # 공개용 JSON/HTML 생성 (공개 항목 목록 PUBLIC_FIELDS)
 │   ├── collectors/        # 나라장터 API 수집 (예정)
 │   ├── filters/           # PG 관련 공고 선별 (예정)
 │   └── storage/           # 저장 및 변경이력 관리 (예정)
 ├── .github/workflows/
 │   └── api-connection-test.yml  # API 연결 테스트 (GitHub Actions, 수동 실행)
+├── docs/publishing.md     # 공개 항목·보안 위험·배포·ChatGPT 확인 방법
 ├── tests/                 # 자동 테스트 (pytest)
 ├── data/                  # 수집 결과 저장 폴더 (내용은 GitHub에 올라가지 않음)
 ├── .env.example           # 환경설정 예시 (실제 키 없음)
@@ -106,8 +119,12 @@ PYTHONPATH=src python -m pg_monitoring
 1. GitHub 저장소 페이지 상단의 **Actions** 탭을 누릅니다.
 2. 왼쪽 목록에서 **나라장터 API 연결 테스트**를 누릅니다.
 3. 오른쪽의 **Run workflow** 버튼 → (기본값 그대로) 초록색 **Run workflow** 를 누릅니다.
+   - 공개 웹페이지로 올리려면 **"GitHub Pages에 배포"** 를 체크합니다. (처음엔 체크하지 말고 결과부터 확인 권장)
 4. 잠시 후 목록에 생긴 실행 항목을 누르면 결과 요약이 나옵니다. (초록 ✅ = 두 API 모두 정상, 빨강 ❌ = 하나 이상 실패)
 5. 실패한 경우 결과 요약의 **오류 원인 / 해결 방법**을 확인하세요.
+6. 성공하면 실행 화면 아래 **Artifacts → nara-sample-site** 를 내려받아 `index.html`, `data.json` 을 미리 볼 수 있습니다.
+
+GitHub Pages 설정, 공개 항목, 보안 위험, ChatGPT에서 읽히는지 확인하는 방법은 [docs/publishing.md](docs/publishing.md)를 보세요.
 
 ### 결과 판정 기준
 
@@ -118,6 +135,8 @@ PYTHONPATH=src python -m pg_monitoring
 
 - [x] 1단계: 프로젝트 기본 구조
 - [x] 2단계: 나라장터 API 연결 테스트 (입찰공고·사전규격)
+- [x] 2단계: 공개용 샘플 JSON/HTML 생성 및 GitHub Pages 배포(수동)
+- [ ] 2단계 확인: ChatGPT가 결과 페이지를 읽는지 검증
 - [ ] 2-2단계: 전체 공고 수집
 - [ ] 3단계: PG 공고 선별 및 변경이력 관리
 - [ ] 4단계: GitHub Actions 정기 실행
