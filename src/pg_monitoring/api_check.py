@@ -299,6 +299,25 @@ def check_api(spec: ApiSpec, service_key: str, params: dict[str, str]) -> CheckR
     return interpret(spec, status, body, result)
 
 
+def adjust_for_shared_key(results: list[CheckResult]) -> list[CheckResult]:
+    """두 API는 같은 인증키를 쓴다. 한쪽이 성공(=키 정상)했는데 다른 쪽이 인증 오류라면
+    키 문제가 아니라 그 API의 활용신청(승인) 문제이므로 안내를 바꾼다."""
+    if not any(r.http_status == 200 and r.result_code == "00" for r in results):
+        return results
+    for r in results:
+        if not r.success and r.result_code in ("20", "30"):
+            r.error_cause = (
+                "인증키는 정상입니다(다른 API는 같은 키로 성공). "
+                "이 API에 대한 활용신청이 없거나, 승인이 아직 반영되지 않았습니다."
+            )
+            r.error_fix = (
+                "공공데이터포털 → 마이페이지 → 데이터활용 → Open API → 활용신청 현황에서 "
+                f"'{r.api_name.split(' (')[0]}'가 '승인' 상태인지 확인하세요. "
+                "없으면 해당 API 페이지에서 '활용신청'을 하고, 승인 직후라면 1~2시간 뒤 다시 실행하세요."
+            )
+    return results
+
+
 def format_report(results: list[CheckResult], params: dict[str, str]) -> str:
     lines = [
         "=" * 60,
@@ -354,7 +373,7 @@ def main(argv: list[str] | None = None) -> int:
 
     now = datetime.now(KST).replace(second=0, microsecond=0)
     params = query_params(now, days, rows)
-    results = [check_api(spec, service_key, params) for spec in APIS]
+    results = adjust_for_shared_key([check_api(spec, service_key, params) for spec in APIS])
     all_ok = all(r.success for r in results)
 
     site_dir = os.environ.get("SITE_DIR", "").strip()

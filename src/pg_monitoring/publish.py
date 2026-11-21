@@ -44,6 +44,7 @@ PUBLIC_FIELDS: dict[str, tuple[tuple[str, str, str], ...]] = {
         ("prdctClsfcNoNm", "title", "품명(사업명)"),
         ("orderInsttNm", "order_org", "발주기관"),
         ("rlDminsttNm", "demand_org", "실수요기관"),
+        ("rgstDt", "registered_dt", "등록일시"),
         ("rcptDt", "receipt_dt", "접수일시"),
         ("opninRgstClseDt", "opinion_close_dt", "의견등록마감일시"),
         ("asignBdgtAmt", "budget", "배정예산(원)"),

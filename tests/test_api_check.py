@@ -129,3 +129,19 @@ def test_main_never_prints_key(monkeypatch, capsys, tmp_path):
     out = capsys.readouterr().out + summary.read_text(encoding="utf-8")
     assert DECODED not in out and ENCODED not in out
     assert "❌ 실패" in out
+
+
+def test_shared_key_hint_when_other_api_succeeds():
+    ok = ac.CheckResult(api_name=PRE.name, endpoint="e", success=True, http_status=200, result_code="00")
+    bad = ac.CheckResult(api_name=BID.name, endpoint="e", http_status=403, result_code="30",
+                         error_cause="등록되지 않은 인증키", error_fix="키 재등록")
+    ac.adjust_for_shared_key([bad, ok])
+    assert "인증키는 정상" in bad.error_cause
+    assert "입찰공고정보서비스" in bad.error_fix and "활용신청" in bad.error_fix
+
+
+def test_no_shared_key_hint_when_all_fail():
+    bad = ac.CheckResult(api_name=BID.name, endpoint="e", http_status=403, result_code="30",
+                         error_cause="등록되지 않은 인증키", error_fix="키 재등록")
+    ac.adjust_for_shared_key([bad, bad])
+    assert bad.error_cause == "등록되지 않은 인증키"
