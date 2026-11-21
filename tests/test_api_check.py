@@ -166,3 +166,28 @@ def test_needs_diagnosis_only_when_other_api_succeeds():
     bad = ac.CheckResult(api_name="b", endpoint="e", result_code="30")
     assert ac.needs_diagnosis([ok, bad]) == [bad]
     assert ac.needs_diagnosis([bad, bad]) == []
+
+
+def test_interpret_xml_success():
+    body = ("<?xml version='1.0' encoding='UTF-8'?><response><header><resultCode>00</resultCode>"
+            "<resultMsg>정상</resultMsg></header><body><items>"
+            "<item><bidNtceNo>R26BK1</bidNtceNo><bidNtceOrd>000</bidNtceOrd><bidNtceNm>결제대행 용역</bidNtceNm></item>"
+            "<item><bidNtceNo>R26BK2</bidNtceNo><bidNtceOrd>001</bidNtceOrd><bidNtceNm>PG 용역</bidNtceNm></item>"
+            "</items><numOfRows>5</numOfRows><pageNo>1</pageNo><totalCount>42</totalCount></body></response>")
+    r = ac.interpret(BID, 200, body, _result(BID))
+    assert r.success and r.total_count == 42
+    assert r.examples == [("R26BK1-000", "결제대행 용역"), ("R26BK2-001", "PG 용역")]
+
+
+def test_interpret_xml_error_code():
+    body = ("<response><header><resultCode>08</resultCode><resultMsg>필수값 입력 에러</resultMsg>"
+            "</header></response>")
+    r = ac.interpret(BID, 200, body, _result(BID))
+    assert not r.success and r.result_code == "08" and "필수" in r.error_cause
+
+
+def test_unparseable_body_shows_snippet():
+    r = ac.interpret(BID, 200, "  <html>\n 서비스 점검 중 </html> ", _result(BID))
+    assert not r.success and r.raw_snippet == "<html> 서비스 점검 중 </html>"
+    report = ac.format_report([r], ac.query_params(datetime(2026, 1, 1, tzinfo=ac.KST), 7, 5))
+    assert "응답 앞부분" in report and "서비스 점검 중" in report

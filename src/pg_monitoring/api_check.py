@@ -166,6 +166,7 @@ class CheckResult:
     total_count: int | None = None
     examples: list[tuple[str, str]] = field(default_factory=list)
     items: list[dict] = field(default_factory=list, repr=False)  # 원본 응답(출력 금지, 공개 파일은 화이트리스트로만 생성)
+    raw_snippet: str | None = None  # 해석 불가 응답의 앞부분 (출력 전 인증키 제거됨)
     error_cause: str | None = None
     error_fix: str | None = None
 
@@ -203,6 +204,34 @@ def _example(spec: ApiSpec, item: dict) -> tuple[str, str]:
     return number or "(공고번호 없음)", title or "(공고명 없음)"
 
 
+def _parse_json_response(body: str) -> tuple[dict, dict] | None:
+    try:
+        response = json.loads(body)["response"]
+        return response.get("header", {}) or {}, response.get("body") or {}
+    except (ValueError, KeyError, TypeError, AttributeError):
+        return None
+
+
+def _parse_xml_response(body: str) -> tuple[dict, dict] | None:
+    """type=json 을 무시하고 XML로 답하는 경우: <response><header>..</header><body><items><item>.. 형태."""
+    try:
+        root = ET.fromstring(body.strip())
+    except ET.ParseError:
+        return None
+    header_el = root.find(".//header")
+    if header_el is None:
+        return None
+    header = {c.tag: (c.text or "").strip() for c in header_el}
+    body_el = root.find(".//body")
+    body_obj: dict = {}
+    if body_el is not None:
+        body_obj["totalCount"] = (body_el.findtext("totalCount") or "").strip()
+        body_obj["items"] = [
+            {f.tag: (f.text or "").strip() for f in item} for item in body_el.iter("item")
+        ]
+    return header, body_obj
+
+
 def interpret(spec: ApiSpec, http_status: int, body: str, result: CheckResult) -> CheckResult:
     result.http_status = http_status
 
@@ -221,15 +250,13 @@ def interpret(spec: ApiSpec, http_status: int, body: str, result: CheckResult) -
         result.error_fix = "API 서버가 일시적으로 응답하지 않을 수 있습니다. 잠시 후 다시 실행하세요."
         return result
 
-    try:
-        data = json.loads(body)
-        response = data["response"]
-        header = response.get("header", {})
-        body_obj = response.get("body") or {}
-    except (ValueError, KeyError, TypeError, AttributeError):
-        result.error_cause = "응답 형식을 해석할 수 없음 (JSON 형식이 아님)"
-        result.error_fix = "API 응답 형식이 변경되었을 수 있습니다. 개발자에게 문의하세요."
+    parsed = _parse_json_response(body) or _parse_xml_response(body)
+    if parsed is None:
+        result.error_cause = "응답 형식을 해석할 수 없음 (JSON/XML 형식이 아님)"
+        result.error_fix = "아래 '응답 앞부분'을 개발자에게 전달하세요."
+        result.raw_snippet = " ".join(body.split())[:400] or "(빈 응답)"
         return result
+    header, body_obj = parsed
 
     result.result_code = str(header.get("resultCode", "")).strip() or None
     result.result_msg = str(header.get("resultMsg", "")).strip() or None
@@ -396,6 +423,8 @@ def format_report(results: list[CheckResult], params: dict[str, str]) -> str:
             lines.append(f"  공개 항목 중 응답에 없는 필드: {', '.join(missing) if missing else '없음'}")
         if r.error_cause:
             lines += [f"  오류 원인     : {r.error_cause}", f"  해결 방법     : {r.error_fix}"]
+        if r.raw_snippet:
+            lines.append(f"  응답 앞부분   : {r.raw_snippet}")
     ok = sum(r.success for r in results)
     lines += ["", "=" * 60, f"종합: {len(results)}개 API 중 {ok}개 정상", "=" * 60]
     return "\n".join(lines)
