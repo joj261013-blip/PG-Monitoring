@@ -16,7 +16,7 @@ class Source:
     label: str
     path: str
     kind: str  # "bid" | "prespec"
-    inqry_div: str
+    inqry_divs: tuple[str, ...]
     enabled: bool
 
 
@@ -42,7 +42,7 @@ def enabled_sources(settings: dict) -> list[Source]:
             label=str(s.get("label", key)),
             path=str(s["path"]),
             kind=str(s.get("kind", "bid")),
-            inqry_div=str(s.get("inqry_div", "1")),
+            inqry_divs=tuple(str(d) for d in s.get("inqry_divs", ["1"])),
             enabled=bool(s.get("enabled", False)),
         )
         if src.enabled:
