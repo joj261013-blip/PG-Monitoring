@@ -31,10 +31,8 @@ class Settings:
 
     @property
     def masked_service_key(self) -> str:
-        """화면 출력용으로 가린 인증키 (앞 4자리만 표시)."""
-        if not self.service_key:
-            return "(미설정)"
-        return self.service_key[:4] + "*" * 8
+        """화면 출력용 인증키 상태. 키의 어떤 부분도 노출하지 않는다."""
+        return "(설정됨 - 값은 표시하지 않음)" if self.service_key else "(미설정)"
 
 
 def _split_keywords(raw: str) -> tuple[str, ...]:
@@ -53,7 +51,8 @@ def load_settings(env_file: Path | None = None) -> Settings:
         data_dir = PROJECT_ROOT / data_dir
 
     return Settings(
-        service_key=os.getenv("G2B_SERVICE_KEY", "").strip(),
+        # NARA_API_KEY 가 정식 이름. G2B_SERVICE_KEY 는 이전 이름(호환용).
+        service_key=(os.getenv("NARA_API_KEY", "").strip() or os.getenv("G2B_SERVICE_KEY", "").strip()),
         keywords=_split_keywords(os.getenv("PG_KEYWORDS", DEFAULT_KEYWORDS)),
         data_dir=data_dir,
         log_level=os.getenv("LOG_LEVEL", "INFO").strip().upper() or "INFO",

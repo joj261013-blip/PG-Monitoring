@@ -20,7 +20,7 @@ def main() -> int:
     print(f"- 데이터 폴더  : {settings.data_dir}")
     print(f"- 로그 수준    : {settings.log_level}")
     if not settings.has_service_key:
-        print("※ 인증키가 설정되지 않았습니다. (.env 또는 GitHub Secrets에 G2B_SERVICE_KEY 등록 필요)")
+        print("※ 인증키가 설정되지 않았습니다. (.env 또는 GitHub Secrets에 NARA_API_KEY 등록 필요)")
     print("현재는 기본 구조만 구성된 상태이며, 공고 수집 기능은 아직 구현되지 않았습니다.")
     return 0
 
