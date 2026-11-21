@@ -129,3 +129,40 @@ def test_main_never_prints_key(monkeypatch, capsys, tmp_path):
     out = capsys.readouterr().out + summary.read_text(encoding="utf-8")
     assert DECODED not in out and ENCODED not in out
     assert "❌ 실패" in out
+
+
+def test_shared_key_hint_when_other_api_succeeds():
+    ok = ac.CheckResult(api_name=PRE.name, endpoint="e", success=True, http_status=200, result_code="00")
+    bad = ac.CheckResult(api_name=BID.name, endpoint="e", http_status=403, result_code="30",
+                         error_cause="등록되지 않은 인증키", error_fix="키 재등록")
+    ac.adjust_for_shared_key([bad, ok])
+    assert "인증키는 정상" in bad.error_cause
+    assert "입찰공고정보서비스" in bad.error_fix and "활용신청" in bad.error_fix
+
+
+def test_no_shared_key_hint_when_all_fail():
+    bad = ac.CheckResult(api_name=BID.name, endpoint="e", http_status=403, result_code="30",
+                         error_cause="등록되지 않은 인증키", error_fix="키 재등록")
+    ac.adjust_for_shared_key([bad, bad])
+    assert bad.error_cause == "등록되지 않은 인증키"
+
+
+def test_diagnose_all_rejected(monkeypatch):
+    calls = []
+
+    def fake(spec, key, params):
+        calls.append(spec.path)
+        return ac.CheckResult(api_name=spec.name, endpoint="e", http_status=403, result_code="30")
+
+    monkeypatch.setattr(ac, "check_api", fake)
+    failed = ac.CheckResult(api_name=BID.name, endpoint=ac.API_HOST + BID.path, result_code="30")
+    out = ac.diagnose("k", {"numOfRows": "5"}, [failed])
+    assert len(calls) == 5 and all("/ad/BidPublicInfoService/" in c for c in calls)
+    assert "모든 오퍼레이션" in out and "1:1 문의" in out
+
+
+def test_needs_diagnosis_only_when_other_api_succeeds():
+    ok = ac.CheckResult(api_name="a", endpoint="e", success=True)
+    bad = ac.CheckResult(api_name="b", endpoint="e", result_code="30")
+    assert ac.needs_diagnosis([ok, bad]) == [bad]
+    assert ac.needs_diagnosis([bad, bad]) == []

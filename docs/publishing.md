@@ -27,7 +27,7 @@
 | 사전규격등록번호 | `bfSpecRgstNo` |
 | 품명(사업명) | `prdctClsfcNoNm` |
 | 발주기관 / 실수요기관 | `orderInsttNm` / `rlDminsttNm` |
-| 접수일시 / 의견등록마감일시 / 변경일시 | `rcptDt` / `opninRgstClseDt` / `chgDt` |
+| 등록일시 / 접수일시 / 의견등록마감일시 / 변경일시 | `rgstDt` / `rcptDt` / `opninRgstClseDt` / `chgDt` |
 | 배정예산 | `asignBdgtAmt` |
 | 관련 입찰공고번호 | `bidNtceNoList` |
 

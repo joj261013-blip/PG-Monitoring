@@ -299,6 +299,70 @@ def check_api(spec: ApiSpec, service_key: str, params: dict[str, str]) -> CheckR
     return interpret(spec, status, body, result)
 
 
+def adjust_for_shared_key(results: list[CheckResult]) -> list[CheckResult]:
+    """두 API는 같은 인증키를 쓴다. 한쪽이 성공(=키 정상)했는데 다른 쪽이 인증 오류라면
+    키 문제가 아니라 그 API의 활용신청(승인) 문제이므로 안내를 바꾼다."""
+    if not any(r.http_status == 200 and r.result_code == "00" for r in results):
+        return results
+    for r in results:
+        if not r.success and r.result_code in ("20", "30"):
+            r.error_cause = (
+                "인증키는 정상입니다(다른 API는 같은 키로 성공). "
+                "이 API에 대한 활용신청이 없거나, 승인이 아직 반영되지 않았습니다."
+            )
+            r.error_fix = (
+                "공공데이터포털 → 마이페이지 → 데이터활용 → Open API → 활용신청 현황에서 "
+                f"'{r.api_name.split(' (')[0]}'가 '승인' 상태인지 확인하세요. "
+                "없으면 해당 API 페이지에서 '활용신청'을 하고, 승인 직후라면 1~2시간 뒤 다시 실행하세요."
+            )
+    return results
+
+
+# 인증 오류가 한 API에서만 날 때, 같은 서비스의 다른 오퍼레이션도 같은 키로 시도해
+# '서비스 전체 문제'인지 '특정 오퍼레이션 문제'인지 가린다. (결과코드만 출력)
+DIAGNOSE_OPERATIONS: dict[str, tuple[str, ...]] = {
+    "/1230000/ad/BidPublicInfoService": (
+        "getBidPblancListInfoServc", "getBidPblancListInfoThng", "getBidPblancListInfoCnstwk",
+        "getBidPblancListInfoEtc", "getBidPblancListInfoServcPPSSrch",
+    ),
+    "/1230000/ao/HrcspSsstndrdInfoService": (
+        "getPublicPrcureThngInfoServc", "getPublicPrcureThngInfoThng", "getPublicPrcureThngInfoCnstwk",
+    ),
+}
+
+
+def needs_diagnosis(results: list[CheckResult]) -> list[CheckResult]:
+    """다른 API는 성공했는데 인증 오류(20/30)가 난 결과 목록."""
+    if not any(r.success for r in results):
+        return []
+    return [r for r in results if not r.success and r.result_code in ("20", "30")]
+
+
+def diagnose(service_key: str, params: dict[str, str], failed: list[CheckResult]) -> str:
+    lines = ["", "■ 추가 진단 (같은 인증키로 같은 서비스의 다른 오퍼레이션 시도, 결과코드만 표시)"]
+    probe = {**params, "numOfRows": "1"}
+    for r in failed:
+        path = r.endpoint.removeprefix(API_HOST)
+        service = path.rsplit("/", 1)[0]
+        codes = []
+        for op in DIAGNOSE_OPERATIONS.get(service, ()):
+            spec = ApiSpec(name=op, path=f"{service}/{op}", number_fields=(), title_fields=())
+            pr = check_api(spec, service_key, probe)
+            code = pr.result_code or "-"
+            codes.append(code)
+            lines.append(f"  {service}/{op}: HTTP {pr.http_status or '-'} / 코드 {code}")
+        codes = [c for c in codes if c != "-"]  # 네트워크 오류로 응답이 없던 시도는 판정에서 제외
+        if codes and all(c in ("20", "30") for c in codes):
+            lines.append("  → 판정: 이 서비스의 모든 오퍼레이션에서 같은 키가 거부됩니다. "
+                         "코드 문제가 아니라 공공데이터포털 쪽 인증키 등록(동기화) 문제입니다.")
+            lines.append("    해결: 공공데이터포털 해당 API 활용신청 상세에서 '변경신청'(내용 변경 없이 저장)으로 재동기화하거나, "
+                         "공공데이터포털 1:1 문의(오류신고)에 '다른 서비스는 같은 키로 정상, 이 서비스만 "
+                         "SERVICE_KEY_IS_NOT_REGISTERED_ERROR'라고 접수하세요. (인증키는 문의에 적지 마세요)")
+        elif any(c == "00" or c == "03" for c in codes):
+            lines.append("  → 판정: 일부 오퍼레이션은 정상입니다. 사용하는 오퍼레이션 문제이므로 개발자에게 이 진단 결과를 전달하세요.")
+    return "\n".join(lines)
+
+
 def format_report(results: list[CheckResult], params: dict[str, str]) -> str:
     lines = [
         "=" * 60,
@@ -354,7 +418,7 @@ def main(argv: list[str] | None = None) -> int:
 
     now = datetime.now(KST).replace(second=0, microsecond=0)
     params = query_params(now, days, rows)
-    results = [check_api(spec, service_key, params) for spec in APIS]
+    results = adjust_for_shared_key([check_api(spec, service_key, params) for spec in APIS])
     all_ok = all(r.success for r in results)
 
     site_dir = os.environ.get("SITE_DIR", "").strip()
@@ -365,7 +429,11 @@ def main(argv: list[str] | None = None) -> int:
     elif site_dir:
         site_line = "공개용 샘플 파일 생성: 건너뜀 (두 API가 모두 성공해야 생성합니다)"
 
-    report = redact(format_report(results, params), service_key)
+    report = format_report(results, params)
+    failed = needs_diagnosis(results)
+    if failed:
+        report += "\n" + diagnose(service_key, params, failed)
+    report = redact(report, service_key)
     if site_line:
         report += "\n" + site_line
     print(report)
